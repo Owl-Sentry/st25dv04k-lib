@@ -42,6 +42,7 @@ static const uint16_t REG_ENDA3 = 0x0009;
 static const uint16_t REG_RFA4SS = 0x000a;
 static const uint16_t REG_I2CSS = 0x000b;
 static const uint16_t REG_LOCK_CCFILE = 0x000c;
+static const uint16_t REG_FTM = 0x000d;
 static const uint16_t REG_MB_MODE = 0x000d;
 static const uint16_t REG_I2C_CFG = 0x000e;
 static const uint16_t REG_LOCK_CFG = 0x000f;
