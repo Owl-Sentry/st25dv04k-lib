@@ -70,6 +70,143 @@ const char *SFE_ST25DV64KC::errorCodeString(SF_ST25DV64KC_ERROR errorCode)
   }
 };
 
+bool SFE_ST25DV64KC::writeNDEFURI(const char *uri, uint8_t idCode, uint16_t *address, bool MB, bool ME)
+{
+  // Total length could be: strlen(uri) + 8 (see above) + 2 (if L field > 0xFE) + 3 (if PAYLOAD LENGTH > 255)
+  uint8_t *tagWrite = new uint8_t[strlen(uri) + 13];
+
+  if (tagWrite == NULL)
+  {
+    SAFE_CALLBACK(_errorCallback, SF_ST25DV64KC_ERROR::OUT_OF_MEMORY);
+    return false; // Memory allocation failed
+  }
+
+  memset(tagWrite, 0, strlen(uri) + 13);
+
+  uint8_t *tagPtr = tagWrite;
+
+  uint16_t payloadLength = strlen(uri) + 1; // Payload length is strlen(uri) + Record Type
+
+  // Total field length is strlen(uri) + Prefix Code + Record Type + Payload Length + Type Length + Record Header
+  uint16_t fieldLength = strlen(uri) + 1 + 1 + ((payloadLength <= 0xFF) ? 1 : 4) + 1 + 1;
+
+  // Only write the Type 5 T & L fields if the Message Begin bit is set
+  if (MB)
+  {
+    *tagPtr++ = SFE_ST25DV_TYPE5_NDEF_MESSAGE_TLV; // Type5 Tag TLV-Format: T (Type field)
+
+    if (fieldLength > 0xFE) // Is the total L greater than 0xFE?
+    {
+      *tagPtr++ = 0xFF; // Type5 Tag TLV-Format: L (Length field) (3-Byte Format)
+      *tagPtr++ = fieldLength >> 8;
+      *tagPtr++ = fieldLength & 0xFF;
+    }
+    else
+    {
+      *tagPtr++ = fieldLength; // Type5 Tag TLV-Format: L (Length field) (1-Byte Format)
+    }
+  }
+
+  // NDEF Record Header
+  *tagPtr++ = (MB ? SFE_ST25DV_NDEF_MB : 0) | (ME ? SFE_ST25DV_NDEF_ME : 0) | ((payloadLength <= 0xFF) ? SFE_ST25DV_NDEF_SR : 0) | SFE_ST25DV_NDEF_TNF_WELL_KNOWN;
+  *tagPtr++ = 0x01; // NDEF Type Length
+  if (payloadLength <= 0xFF)
+  {
+    *tagPtr++ = payloadLength; // NDEF Payload Length (1-Byte)
+  }
+  else
+  {
+    *tagPtr++ = 0; //payloadLength >> 24; // NDEF Payload Length (4-Byte)
+    *tagPtr++ = 0; //(payloadLength >> 16) & 0xFF;
+    *tagPtr++ = (payloadLength >> 8) & 0xFF;
+    *tagPtr++ = payloadLength & 0xFF;
+  }
+  *tagPtr++ = SFE_ST25DV_NDEF_URI_RECORD; // NDEF Record Type
+  *tagPtr++ = idCode; // NDEF URI Prefix Code
+
+  strcpy((char *)tagPtr, uri); // Add the URI
+
+  tagPtr += strlen(uri);
+
+  if (ME)
+  {
+    *tagPtr++ = SFE_ST25DV_TYPE5_TERMINATOR_TLV; // Type5 Tag TLV-Format: T (Type field)
+  }
+
+  uint16_t memLoc = _ccFileLen; // Write to this memory location
+  uint16_t numBytes = tagPtr - tagWrite;
+
+  if (address != NULL)
+  {
+    memLoc = *address;
+  }
+
+  bool result = writeEEPROM(memLoc, tagWrite, numBytes);
+
+  if ((address != NULL) && (result))
+  {
+    *address = memLoc + numBytes - (ME ? 1 : 0); // Update address so the next writeNDEFURI can append to this one
+  }
+
+  // If Message Begin is not set, we need to go back and update the L field
+  if (!MB)
+  {
+    uint16_t baseAddress = _ccFileLen + 1; // Skip the SFE_ST25DV_TYPE5_NDEF_MESSAGE_TLV
+    uint8_t data[3];
+    result &= readEEPROM(baseAddress, data, 0x03); // Read the possible three length bytes
+    if (!result)
+      return false;
+    if (data[0] == 0xFF) // Is the length already 3-byte?
+    {
+      uint16_t oldLen = ((uint16_t)data[1] << 8) | data[2];
+      oldLen += (ME ? numBytes - 1 : numBytes);
+      data[1] = oldLen >> 8;
+      data[2] = oldLen & 0xFF;
+      result &= writeEEPROM(baseAddress, data, 0x03); // Update the existing 3-byte length
+    }
+    else
+    {
+      // Length is 1-byte
+      uint16_t newLen = data[0];
+      newLen += (ME ? numBytes - 1 : numBytes);
+      if (newLen <= 0xFE) // Is the new length still 1-byte?
+      {
+        data[0] = newLen;
+        result &= writeEEPROM(baseAddress, data, 0x01); // Update the existing 1-byte length
+      }
+      else
+      {
+        // The length was 1-byte but needs to be changed to 3-byte
+        delete[] tagWrite; // Resize tagWrite
+        tagWrite = new uint8_t[newLen + 4];
+        if (tagWrite == NULL)
+        {
+          SAFE_CALLBACK(_errorCallback, SF_ST25DV64KC_ERROR::OUT_OF_MEMORY);
+          return false; // Memory allocation failed
+        }
+        tagPtr = tagWrite; // Reset tagPtr
+
+        *tagPtr++ = 0xFF; // Change length to 3-byte
+        *tagPtr++ = newLen >> 8;
+        *tagPtr++ = newLen & 0xFF;
+        result &= readEEPROM(baseAddress + 1, tagPtr, (ME ? newLen + 1 : newLen)); // Copy in the old data
+        if (!result)
+        {
+          delete[] tagWrite;
+          return false;
+        }
+        result &= writeEEPROM(baseAddress, tagWrite, (ME ? newLen + 4 : newLen + 3));
+        if (result)
+          *address = *address + 2; // Update address too
+      }
+    }
+  }
+
+  delete[] tagWrite; // Release the memory
+
+  return result;
+}
+
 bool SFE_ST25DV64KC::isConnected()
 {
   bool connected = st25_io.isConnected();
