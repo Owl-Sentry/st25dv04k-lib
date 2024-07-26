@@ -26,6 +26,9 @@
 
 class SFE_ST25DV64KC
 {
+private:
+  uint16_t _ccFileLen = 8; // Record the length of the CC File - default to 8 bytes for the ST25DV64K
+
 public:
   // Error callback function pointer.
   // Function must accept a SF_ST25DV64KC_ERROR as errorCode.
