@@ -34,6 +34,8 @@ public:
   // Convert errorCode to text
   const char *errorCodeString(SF_ST25DV64KC_ERROR errorCode);
 
+  uint16_t getCCFileLen() { return _ccFileLen; }
+
   // I2C communication object instance - can be used to access the
   // ST25 registers through the IO layer functions.
   SFE_ST2525DV64KC_IO st25_io;
@@ -43,6 +45,8 @@ public:
 
   // Default destructor.
   ~SFE_ST25DV64KC(){};
+
+  bool writeNDEFURI(const char *uri, uint8_t idCode, uint16_t *address, bool MB, bool ME);
 
   // Sets the error callback function.
   void setErrorCallback(void (*errorCallback)(SF_ST25DV64KC_ERROR errorCode));
